@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#4fb8f2">
+<title>Angry Birds</title>
+<link rel="stylesheet" href="style.css">
+<script type="module" src="birdjs.js"></script>
+<script type="module" src="assets.js"></script>
+<script type="module" src="game.js"></script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud" class="hidden">
+  <button id="bPause" title="Pause (P)">❚❚</button>
+  <button id="bRestart" title="Restart (R)">↻</button>
+  <button id="bSnd" title="Sound">🔊</button>
+  <button id="bDebug" class="sec" title="BirdJS Debug (D)">⚙</button>
+  <div class="sp"></div><div id="birdsLeft"></div><div id="score">0</div>
+</div>
+<div id="menu" class="screen hidden">
+  <img id="logo" alt="Angry Birds">
+  <div class="sub">BirdJS slingshot physics</div>
+  <button id="bPlay">▶ PLAY</button>
+  <button id="bEndless" class="sec">♾ ENDLESS MODE</button>
+  <button id="bIntro" class="sec">🎬 Story</button>
+  <button id="bTest" class="sec">Run physics tests</button>
+  <div id="testOut"></div>
+</div>
+<div id="levels" class="screen hidden">
+  <div class="lvTop">
+    <button id="bBack" title="Back"><img id="bBackImg" alt="Back"></button>
+    <h2>Choose a level</h2><div id="totalStars"></div>
+  </div>
+  <div id="grid"></div>
+</div>
+<div id="end" class="screen hidden">
+  <h1 id="endTitle"></h1><div id="stars"></div><div id="endScore"></div>
+  <div class="row">
+    <button id="bRetry">↻ Retry</button><button id="bNext">Next ▶</button>
+    <button id="bFinal" style="display:none">Final 🎬</button><button id="bMenu" class="sec">Levels</button>
+  </div>
+</div>
+<div id="pauseMenu" class="hidden">
+  <h1>Paused</h1><button id="bResume">▶ Resume</button><button id="bRestart2">↻ Restart</button><button id="bMenu2" class="sec">Levels</button>
+</div>
+<div id="cs" class="hidden">
+  <div class="bar top"></div><div class="bar bot"><p id="csText"></p><div id="csHint">Tap to continue</div></div>
+  <button id="csSkip" class="sec">Skip ⏭</button>
+</div>
+<div id="loading">Loading BirdJS…</div>
+</body>
+</html>
