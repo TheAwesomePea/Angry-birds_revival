@@ -22,7 +22,7 @@ jobs:
           node-version: '20'
 
       - name: Resize icon for Linux
-        run: convert icon.png -resize 512x512 icon.png
+        run: ffmpeg -y -i icon.png -vf scale=512:512 icon.png
 
       - name: Install dependencies
         run: npm install
