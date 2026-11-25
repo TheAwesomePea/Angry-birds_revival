@@ -26,7 +26,10 @@ jobs:
 
       - name: Add and Sync Capacitor iOS
         run: |
-          npm install @capacitor/ios
+          npm install @capacitor/core @capacitor/cli @capacitor/ios
+          mkdir -p www
+          cp index.html style.css game.js birdjs.js assets.js icon.png www/ || true
+          npx cap init "AngryBirdsRevival" "com.luiginumbertwo222.angrybirdsrevival" --web-dir www || true
           npx cap add ios || true
           npx cap sync ios
 
