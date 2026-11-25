@@ -8,6 +8,13 @@ jobs:
       - run: |
           tar -xf game.zip
           Get-ChildItem -Recurse -Include index.html,style.css,game.js,birdjs.js,assets.js | Move-Item -Destination . -Force
+          Add-Type -AssemblyName System.Drawing
+          $img = [System.Drawing.Image]::FromFile("$PWD\icon.ico")
+          $bmp = New-Object System.Drawing.Bitmap(256, 256)
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.DrawImage($img, 0, 0, 256, 256)
+          $img.Dispose()
+          $bmp.Save("$PWD\icon_256.png", [System.Drawing.Imaging.ImageFormat]::Png)
       - uses: actions/setup-node@v4
         with:
           node-version: 20
