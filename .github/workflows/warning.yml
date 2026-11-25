@@ -1,0 +1,235 @@
+name: Warning & Moderation Monitor
+
+on:
+  issues:
+    types: [opened, edited]
+  issue_comment:
+    types: [created, edited]
+  pull_request:
+    types: [opened, edited]
+  schedule:
+    - cron: '0 */6 * * *' # Revisa cada 6 horas si ya expiraron los 3-5 días de sanción
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  models: read
+
+jobs:
+  warning-monitor:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Evaluate Behavior & Enforce Warnings / Mutes
+        uses: actions/github-script@v7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ADMIN_BAN_TOKEN: ${{ secrets.ADMIN_BAN_TOKEN }}
+        with:
+          script: |
+            const repoOwner = 'TheAwesomePea';
+            const repoName = context.repo.repo;
+            const now = Date.now();
+
+            // Buscar el Issue maestro donde el agente guarda el registro de usuarios silenciados
+            const { data: allIssues } = await github.rest.issues.listForRepo({
+              owner: repoOwner,
+              repo: repoName,
+              state: 'open',
+              creator: 'github-actions[bot]'
+            });
+
+            let muteRegistry = allIssues.find(i => i.title === '🛡️ [System] Active Mutes Registry');
+            let mutedUsers = {}; // Formato: { "username": { expiresAt: timestamp, days: 3 } }
+
+            if (muteRegistry && muteRegistry.body) {
+              try {
+                const match = muteRegistry.body.match(/```json\n([\s\S]*?)\n```/);
+                if (match) mutedUsers = JSON.parse(match);
+              } catch (e) {}
+            }
+
+            // Limpiar usuarios cuyo castigo de 3 o 5 días ya haya expirado
+            let registryChanged = false;
+            for (const [user, info] of Object.entries(mutedUsers)) {
+              if (now >= info.expiresAt) {
+                delete mutedUsers[user];
+                registryChanged = true;
+              }
+            }
+
+            // Guardar cambios si se ejecutó por cron o expiró alguien
+            async function saveRegistry() {
+              const bodyText = `Registro automático de restricciones temporales (no cerrar manualmente).\n\n\`\`\`json\n${JSON.stringify(mutedUsers, null, 2)}\n\`\`\``;
+              if (muteRegistry) {
+                await github.rest.issues.update({
+                  owner: repoOwner,
+                  repo: repoName,
+                  issue_number: muteRegistry.number,
+                  body: bodyText
+                });
+              } else {
+                const created = await github.rest.issues.create({
+                  owner: repoOwner,
+                  repo: repoName,
+                  title: '🛡️ [System] Active Mutes Registry',
+                  body: bodyText
+                });
+                muteRegistry = created.data;
+              }
+            }
+
+            if (context.eventName === 'schedule') {
+              if (registryChanged) await saveRegistry();
+              return;
+            }
+
+            const actor = context.actor;
+
+            // Inmunidad absoluta para AwesomePea y bots oficiales
+            if (actor.toLowerCase() === repoOwner.toLowerCase() || actor.endsWith('[bot]')) {
+              if (registryChanged) await saveRegistry();
+              return;
+            }
+
+            // Función auxiliar para borrar/cerrar el mensaje del usuario
+            async function removeUserContent() {
+              if (context.eventName === 'issue_comment') {
+                await github.rest.issues.deleteComment({
+                  owner: repoOwner,
+                  repo: repoName,
+                  comment_id: context.payload.comment.id
+                });
+              } else if (context.eventName === 'issues' || context.eventName === 'pull_request') {
+                const number = context.payload.issue?.number || context.payload.pull_request?.number;
+                await github.rest.issues.update({
+                  owner: repoOwner,
+                  repo: repoName,
+                  issue_number: number,
+                  state: 'closed'
+                });
+              }
+            }
+
+            // 1. Verificar si el usuario YA está silenciado por 3 o 5 días
+            if (mutedUsers[actor] && now < mutedUsers[actor].expiresAt) {
+              await removeUserContent();
+              if (registryChanged) await saveRegistry();
+              return;
+            }
+
+            // 2. Extraer texto a evaluar
+            let contentToCheck = '';
+            let sourceUrl = '';
+            if (context.eventName === 'issues') {
+              contentToCheck = `Título: ${context.payload.issue.title}\nCuerpo: ${context.payload.issue.body || ''}`;
+              sourceUrl = context.payload.issue.html_url;
+            } else if (context.eventName === 'issue_comment') {
+              contentToCheck = context.payload.comment.body || '';
+              sourceUrl = context.payload.comment.html_url;
+            } else if (context.eventName === 'pull_request') {
+              contentToCheck = `PR: ${context.payload.pull_request.title}\nDescripción: ${context.payload.pull_request.body || ''}`;
+              sourceUrl = context.payload.pull_request.html_url;
+            }
+
+            if (!contentToCheck) return;
+
+            // 3. Evaluar con IA (GitHub Models)
+            const aiRes = await fetch('https://azure.com', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`
+              },
+              body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                response_format: { type: "json_object" },
+                messages: [
+                  {
+                    role: 'system',
+                    content: `Eres el monitor de advertencias de @TheAwesomePea en Angry Birds Revival. Clasifica el mensaje en:
+                    - "none": mensaje normal y respetuoso.
+                    - "warning": comentario un poco inapropiado, grosero, burla leve, chiste pesado o falta de respeto menor (no suficiente para baneo permanente, pero sí para advertencia y silencio de 3 a 5 días).
+                    - "banish": acoso grave, discurso de odio explícito, amenazas, chistes racistas extremos o sabotaje.
+                    Responde ÚNICAMENTE en JSON válido: {"severity": "none" | "warning" | "banish", "mute_days": 3 | 5, "reason": "motivo breve"}`
+                  },
+                  {
+                    role: 'user',
+                    content: `Usuario: ${actor}\nContenido:\n${contentToCheck}`
+                  }
+                ]
+              })
+            });
+
+            const aiData = await aiRes.json();
+            let verdict = { severity: 'none', mute_days: 3, reason: '' };
+            try {
+              verdict = JSON.parse(aiData.choices.message.content);
+            } catch (e) {
+              return;
+            }
+
+            if (verdict.severity === 'none') {
+              if (registryChanged) await saveRegistry();
+              return;
+            }
+
+            // 4. Caso ADVERTENCIA LEVE ("warning") -> Mensaje en inglés + silencio de 3 o 5 días
+            if (verdict.severity === 'warning') {
+              const days = verdict.mute_days === 5 ? 5 : 3;
+              mutedUsers[actor] = {
+                expiresAt: now + days * 24 * 60 * 60 * 1000,
+                days
+              };
+              await saveRegistry();
+
+              const warningMessage = `@${actor} **Warning:** Do not make rude or inappropriate comments, racist/narcissistic jokes, memes insulting other users, or harass anyone. For now, you will not be able to send messages for **${days} days**.`;
+
+              // Publicar la advertencia en inglés donde ocurrió el mensaje
+              if (context.eventName === 'issue_comment') {
+                await github.rest.issues.createComment({
+                  owner: repoOwner,
+                  repo: repoName,
+                  issue_number: context.payload.issue.number,
+                  body: warningMessage
+                });
+                // Borrar el comentario ofensivo original
+                await github.rest.issues.deleteComment({
+                  owner: repoOwner,
+                  repo: repoName,
+                  comment_id: context.payload.comment.id
+                });
+              } else if (context.eventName === 'issues' || context.eventName === 'pull_request') {
+                const number = context.payload.issue?.number || context.payload.pull_request?.number;
+                await github.rest.issues.createComment({
+                  owner: repoOwner,
+                  repo: repoName,
+                  issue_number: number,
+                  body: warningMessage
+                });
+                await github.rest.issues.update({
+                  owner: repoOwner,
+                  repo: repoName,
+                  issue_number: number,
+                  state: 'closed'
+                });
+              }
+
+              // Avisar a @TheAwesomePea del usuario advertido
+              await github.rest.issues.create({
+                owner: repoOwner,
+                repo: repoName,
+                title: `⚠️ [Warning Monitor] Usuario advertido: @${actor} (${days} días)`,
+                body: `Hola @${repoOwner}, el usuario **@${actor}** recibió una advertencia por comportamiento levemente inapropiado y fue silenciado por **${days} días**.\n\n* **Motivo:** ${verdict.reason}\n* **Referencia:** ${sourceUrl}`,
+                labels: ['warning']
+              });
+            }
+
+            // 5. Caso GRAVE ("banish") -> Destierro inmediato
+            if (verdict.severity === 'banish') {
+              await removeUserContent();
+              let actionTaken = 'Contenido eliminado/cerrado (pendiente de destierro manual o configurar ADMIN_BAN_TOKEN).';
+
+              if (process.env.ADMIN_BAN_TOKEN) {
+              
