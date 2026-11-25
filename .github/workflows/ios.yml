@@ -31,6 +31,8 @@ jobs:
           cp index.html style.css game.js birdjs.js assets.js icon.png www/ || true
           npx cap init "AngryBirdsRevival" "com.luiginumbertwo222.angrybirdsrevival" --web-dir www || true
           npx cap add ios || true
+          sed -i '' "s/platform :ios, '[0-9.]*'/platform :ios, '15.0'/g" ios/App/Podfile
+          cd ios/App && pod install && cd ../..
           npx cap sync ios
 
       - name: Build Unsigned .ipa
@@ -42,7 +44,7 @@ jobs:
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=""
+            CODE_SIGNING_IDENTITY=""
           mkdir -p Payload
           cp -r build/Build/Products/Release-iphoneos/App.app Payload/
           zip -r AngryBirdsRevival-iOS.ipa Payload
