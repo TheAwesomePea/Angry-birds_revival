@@ -1,0 +1,142 @@
+name: Bug Monitor Agent
+
+on:
+  workflow_run:
+    workflows:
+      - "Build Linux Release"
+      - "Build iOS Release"
+      - "Build Android Release" # Si tu android.yml tiene otro "name:" en la línea 1, cámbialo aquí
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+  models: read
+
+jobs:
+  verify-workflows:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.name != 'Bug Monitor Agent' }}
+
+    steps:
+      - name: Analyze Workflow Status & Diagnose Bugs
+        uses: actions/github-script@v7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          script: |
+            const repoOwner = 'TheAwesomePea';
+            const repoName = context.repo.repo;
+            const run = context.payload.workflow_run;
+            const workflowName = run.name;
+            const conclusion = run.conclusion; // 'success', 'failure', 'cancelled', etc.
+            const issueTitle = `🐞 [Bug Monitor] Fallo en workflow: ${workflowName}`;
+
+            // Buscar si ya existe un reporte abierto para este workflow
+            const { data: openIssues } = await github.rest.issues.listForRepo({
+              owner: repoOwner,
+              repo: repoName,
+              state: 'open',
+              creator: 'github-actions[bot]'
+            });
+            const existingIssue = openIssues.find(i => i.title === issueTitle);
+
+            // 1. Si el workflow FUNCIONÓ -> Cerrar reporte previo si existía
+            if (conclusion === 'success') {
+              if (existingIssue) {
+                await github.rest.issues.createComment({
+                  owner: repoOwner,
+                  repo: repoName,
+                  issue_number: existingIssue.number,
+                  body: `✅ **¡Workflow reparado!** La ejecución [#${run.run_number}](${run.html_url}) de **${workflowName}** finalizó correctamente. Cerrando este reporte.`
+                });
+                await github.rest.issues.update({
+                  owner: repoOwner,
+                  repo: repoName,
+                  issue_number: existingIssue.number,
+                  state: 'closed'
+                });
+              }
+              return;
+            }
+
+            // 2. Si el workflow FALLÓ -> Inspeccionar jobs, descargar logs y diagnosticar con IA
+            if (conclusion === 'failure') {
+              const { data: jobsData } = await github.rest.actions.listJobsForWorkflowRun({
+                owner: repoOwner,
+                repo: repoName,
+                run_id: run.id
+              });
+
+              const failedJobs = jobsData.jobs.filter(j => j.conclusion === 'failure');
+              const passedJobs = jobsData.jobs.filter(j => j.conclusion === 'success');
+
+              const statusSummary = [
+                ...passedJobs.map(j => `✅ ${j.name}: OK`),
+                ...failedJobs.map(j => {
+                  const failedSteps = j.steps.filter(s => s.conclusion === 'failure').map(s => s.name);
+                  return `❌ ${j.name}: Falló en [${failedSteps.join(', ')}]`;
+                })
+              ].join('\n');
+
+              // Obtener últimas líneas del log del primer job que falló
+              let errorLog = 'No se pudo descargar el log detallado.';
+              if (failedJobs.length > 0) {
+                try {
+                  const logRes = await github.rest.actions.downloadJobLogsForWorkflowRun({
+                    owner: repoOwner,
+                    repo: repoName,
+                    job_id: failedJobs.id
+                  });
+                  errorLog = String(logRes.data).slice(-4000);
+                } catch (e) {
+                  errorLog = statusSummary;
+                }
+              }
+
+              // Consultar diagnóstico a GitHub Models
+              const aiRes = await fetch('https://azure.com', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`
+                },
+                body: JSON.stringify({
+                  model: 'gpt-4o-mini',
+                  messages: [
+                    {
+                      role: 'system',
+                      content: 'Eres el ingeniero DevOps y detector de bugs de @TheAwesomePea en Angry Birds Revival (JS, Electron, Capacitor, Linux, iOS, Android). Analiza el log fallido y responde en español con: 1) Causa exacta del fallo, 2) Solución paso a paso con el bloque de código corregido.'
+                    },
+                    {
+                      role: 'user',
+                      content: `Workflow: ${workflowName}\nEstado de jobs:\n${statusSummary}\n\nLog del error:\n${errorLog}`
+                    }
+                  ]
+                })
+              });
+
+              const aiData = await aiRes.json();
+              const diagnosis = aiData.choices?.?.message?.content || 'No se pudo generar el análisis automático.';
+
+              const reportBody = `Hola @${repoOwner}, se detectó un error en **[${workflowName} #${run.run_number}](${run.html_url})**.\n\n### 📊 Resumen de procesos\n${statusSummary}\n\n### 🤖 Diagnóstico y solución propuesta\n${diagnosis}`;
+
+              if (existingIssue) {
+                await github.rest.issues.createComment({
+                  owner: repoOwner,
+                  repo: repoName,
+                  issue_number: existingIssue.number,
+                  body: reportBody
+                });
+              } else {
+                await github.rest.issues.create({
+                  owner: repoOwner,
+                  repo: repoName,
+                  title: issueTitle,
+                  body: reportBody,
+                  labels: ['bug']
+                });
+              }
+            }
+            
