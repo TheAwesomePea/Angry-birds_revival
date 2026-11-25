@@ -1,0 +1,40 @@
+name: Build Linux Release
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+      - 'pre-alpha'
+  workflow_dispatch: # Permite ejecutarlo manualmente desde la pestaña Actions
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Linux AppImage & tar.gz
+        run: npx electron-builder --linux AppImage tar.gz
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Linux Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: AngryBirdsRevival-Linux
+          path: |
+            dist/*.AppImage
+            dist/*.tar.gz
+            
