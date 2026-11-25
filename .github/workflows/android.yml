@@ -13,13 +13,14 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
       - run: |
-          mkdir www
+          mkdir -p www
           unzip -j game.zip "*.html" "*.css" "*.js" -d www/
+          rm -rf package.json package-lock.json node_modules
           npm init -y
           npm install @capacitor/core @capacitor/cli @capacitor/android
           npx cap init "Angry Birds Revival" "com.luiginumbertwo222.angrybirdsrevival" --web-dir www
           npx cap add android
-          sed -i 's/<activity/<activity android:screenOrientation="landscape"/' android/app/src/main/AndroidManifest.xml
+          sed -i 's/<activity/<activity android:screenOrientation="landscape" android:theme="@android:style\/Theme.NoTitleBar.Fullscreen"/' android/app/src/main/AndroidManifest.xml
           find android/app/src/main/res -name "ic_launcher*.png" -exec cp icon.png {} \;
           cd android && chmod +x gradlew && ./gradlew assembleDebug
       - uses: actions/upload-artifact@v4
