@@ -1,0 +1,150 @@
+name: Moderation & Banish Agent
+
+on:
+  issues:
+    types: [opened, edited]
+  issue_comment:
+    types: [created, edited]
+  pull_request:
+    types: [opened, edited]
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  models: read
+
+jobs:
+  moderate-activity:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Evaluate Behavior & Notify AwesomePea
+        uses: actions/github-script@v7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ADMIN_BAN_TOKEN: ${{ secrets.ADMIN_BAN_TOKEN }}
+        with:
+          script: |
+            const repoOwner = 'TheAwesomePea';
+            const repoName = context.repo.repo;
+            const actor = context.actor;
+            let contentToCheck = '';
+            let targetType = context.eventName;
+            let sourceUrl = '';
+
+            // 1. Inmunidad absoluta para AwesomePea y bots oficiales
+            if (actor.toLowerCase() === repoOwner.toLowerCase() || actor.endsWith('[bot]')) {
+              return;
+            }
+
+            // 2. Extraer contenido y enlace según el evento
+            if (context.eventName === 'issues') {
+              contentToCheck = `Título: ${context.payload.issue.title}\nCuerpo: ${context.payload.issue.body || ''}`;
+              sourceUrl = context.payload.issue.html_url;
+            } else if (context.eventName === 'issue_comment') {
+              contentToCheck = context.payload.comment.body || '';
+              sourceUrl = context.payload.comment.html_url;
+            } else if (context.eventName === 'pull_request') {
+              contentToCheck = `PR: ${context.payload.pull_request.title}\nDescripción: ${context.payload.pull_request.body || ''}`;
+              sourceUrl = context.payload.pull_request.html_url;
+            } else if (context.eventName === 'push') {
+              const commits = context.payload.commits || [];
+              contentToCheck = commits.map(c => `Commit: ${c.message}`).join('\n');
+              sourceUrl = context.payload.compare;
+            }
+
+            if (!contentToCheck) return;
+
+            // 3. Análisis con IA (GitHub Models)
+            const aiRes = await fetch('https://azure.com', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`
+              },
+              body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                response_format: { type: "json_object" },
+                messages: [
+                  {
+                    role: 'system',
+                    content: `Eres el guardia de seguridad de @TheAwesomePea en el proyecto Angry Birds Revival. Detecta comportamientos inapropiados (insultos, toxicidad, acoso, spam, sabotaje de código o faltas de respeto). Responde ÚNICAMENTE en JSON válido: {"violation": boolean, "severity": "none" | "warning" | "banish", "reason": "explicación clara en español"}`
+                  },
+                  {
+                    role: 'user',
+                    content: `Usuario sospechoso: ${actor}\nAcción: ${targetType}\nContenido:\n${contentToCheck}`
+                  }
+                ]
+              })
+            });
+
+            const aiData = await aiRes.json();
+            let verdict = { violation: false, severity: 'none', reason: '' };
+            try {
+              verdict = JSON.parse(aiData.choices.message.content);
+            } catch (e) {
+              return;
+            }
+
+            if (!verdict.violation || verdict.severity === 'none') {
+              return;
+            }
+
+            // 4. Eliminar o cerrar el contenido ofensivo
+            if (context.eventName === 'issue_comment') {
+              await github.rest.issues.deleteComment({
+                owner: repoOwner,
+                repo: repoName,
+                comment_id: context.payload.comment.id
+              });
+            } else if (context.eventName === 'issues' || context.eventName === 'pull_request') {
+              const number = context.payload.issue?.number || context.payload.pull_request?.number;
+              await github.rest.issues.update({
+                owner: repoOwner,
+                repo: repoName,
+                issue_number: number,
+                state: 'closed'
+              });
+            }
+
+            // 5. Ejecutar destierro si severity === 'banish' y existe ADMIN_BAN_TOKEN
+            let actionTaken = '⚠️ Contenido eliminado/cerrado (pendiente de baneo manual o falta configurar ADMIN_BAN_TOKEN).';
+
+            if (verdict.severity === 'banish' && process.env.ADMIN_BAN_TOKEN) {
+              const adminOctokit = github.getOctokit(process.env.ADMIN_BAN_TOKEN);
+              let removedCollab = false;
+              let blockedUser = false;
+
+              try {
+                await adminOctokit.rest.repos.removeCollaborator({
+                  owner: repoOwner,
+                  repo: repoName,
+                  username: actor
+                });
+                removedCollab = true;
+              } catch (e) {}
+
+              try {
+                await adminOctokit.rest.users.block({
+                  username: actor
+                });
+                blockedUser = true;
+              } catch (e) {}
+
+              if (blockedUser) {
+                actionTaken = `🔨 **DESTERRADO:** El usuario **@${actor}** fue ${removedCollab ? 'expulsado del equipo y ' : ''}bloqueado permanentemente de tu cuenta.`;
+              }
+            }
+
+            // 6. Reporte directo para @TheAwesomePea con el nombre del infractor
+            await github.rest.issues.create({
+              owner: repoOwner,
+              repo: repoName,
+              title: `🚨 [Reporte Moderación] Usuario inapropiado: @${actor}`,
+              body: `Hola @${repoOwner}, se ha detectado un comportamiento inapropiado en el proyecto.\n\n* **Usuario infractor:** @${actor}\n* **Dónde ocurrió:** ${targetType} ([Ver referencia](${sourceUrl}))\n* **Nivel de gravedad:** \`${verdict.severity}\`\n* **Motivo detectado:** ${verdict.reason}\n* **Acción tomada:** ${actionTaken}\n\n> **Contenido registrado:**\n> ${contentToCheck.replace(/\n/g, '\n> ')}`,
+              labels: ['moderation']
+            });
+            
