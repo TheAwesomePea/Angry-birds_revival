@@ -10,7 +10,7 @@
   "build": {
     "appId": "com.luiginumbertwo222.angrybirdsrevival",
     "win": {
-      "icon": "icon.ico"
+      "icon": "icon_256.png"
     }
   },
   "devDependencies": {
