@@ -16,6 +16,8 @@ jobs:
           mkdir -p site
           unzip -j game.zip "*.html" "*.css" "*.js" -d site/
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: 'site'
