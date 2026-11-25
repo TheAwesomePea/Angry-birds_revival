@@ -5,7 +5,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - run: tar -xf game.zip
+      - run: |
+          tar -xf game.zip
+          Get-ChildItem -Recurse -Include index.html,style.css,game.js,birdjs.js,assets.js | Move-Item -Destination . -Force
       - uses: actions/setup-node@v4
         with:
           node-version: 20
