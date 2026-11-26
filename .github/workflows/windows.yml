@@ -21,8 +21,14 @@ jobs:
         shell: bash
         run: unzip -o new-game.zip -d .
 
-      - name: Instalar dependencias
-        run: npm install
+      - name: Instalar dependencias y herramientas de icono
+        run: |
+          npm install
+          npm install sharp png-to-ico
+
+      - name: Generar icon.ico de 256x256 desde icon.png
+        run: |
+          node -e "const sharp = require('sharp'); const pngToIco = require('png-to-ico'); sharp('icon.png').resize(256, 256).png().toBuffer().then(buf => pngToIco(buf)).then(ico => require('fs').writeFileSync('icon.ico', ico));"
 
       - name: Compilar instalador Windows (.exe)
         run: npx electron-builder --win --x64
@@ -30,6 +36,6 @@ jobs:
       - name: Subir EXE generado
         uses: actions/upload-artifact@v4
         with:
-          name: Angry-Birds-Revival-Windows-EXE
+          name: Angry-Birds-Revival-1.0.1
           path: dist/*.exe
           
