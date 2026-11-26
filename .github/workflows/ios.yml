@@ -27,17 +27,17 @@ jobs:
           mkdir -p www
           unzip -o new-game.zip -d www/
 
-      - name: Preparar icono opaco 1024x1024 con sips (nativo macOS)
+      - name: Preparar icono opaco 1024x1024 con sips
         run: |
           mkdir -p assets
           sips -s format jpeg -s formatOptions 100 icon.png --out assets/icon_opaque.jpg
           sips -s format png -z 1024 1024 assets/icon_opaque.jpg --out assets/icon.png
           rm -f assets/icon_opaque.jpg
 
-      - name: Inicializar proyecto iOS y aplicar parches de compatibilidad
+      - name: Inicializar proyecto iOS, parchar Podfile a iOS 15.0 e instalar Pods
         run: |
           npx cap init "Angry Birds Revival" "com.luiginumbertwo222.angrybirdsrevival" --web-dir www
-          npx cap add ios
+          npx cap add ios || true
           sed -i '' "s/platform :ios, '[0-9.]*'/platform :ios, '15.0'/g" ios/App/Podfile
           sed -i '' "s/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*/IPHONEOS_DEPLOYMENT_TARGET = 15.0/g" ios/App/App.xcodeproj/project.pbxproj
           cat << 'EOF' >> ios/App/Podfile
@@ -53,6 +53,7 @@ jobs:
             end
           end
           EOF
+          cd ios/App && pod install && cd ../..
           npx capacitor-assets generate --ios
           npx cap sync ios
 
