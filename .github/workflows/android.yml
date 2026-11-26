@@ -23,26 +23,28 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Instalar dependencias y Capacitor
+      - name: Instalar dependencias, Capacitor y Assets
         run: |
           npm install
-          npm install @capacitor/core @capacitor/cli @capacitor/android
+          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/assets
 
       - name: Descomprimir new-game.zip en carpeta web (www)
         run: |
           mkdir -p www
           unzip -o new-game.zip -d www/
-          cp icon.png www/
 
-      - name: Inicializar y sincronizar Android
+      - name: Inicializar Android y generar iconos desde icon.png
         run: |
           npx cap init "Angry Birds Revival" "com.luiginumbertwo222.angrybirdsrevival" --web-dir www
           npx cap add android
+          mkdir -p assets
+          convert icon.png -resize 1024x1024! assets/icon.png
+          npx capacitor-assets generate --android
           npx cap sync android
 
       - name: Corregir conflicto de versiones Kotlin en Gradle
         run: |
-          cat << 'EOF' >> android/app/build.gradle
+          cat << 'EOF' >> android/app/build/gradle
           dependencies {
               implementation(platform("org.jetbrains.kotlin:kotlin-bom:1.8.22"))
           }
