@@ -37,10 +37,9 @@ jobs:
       - name: Inicializar proyecto iOS con Swift Package Manager (SPM)
         run: |
           npx cap init "Angry Birds Revival" "com.luiginumbertwo222.angrybirdsrevival" --web-dir www
-          npx cap add ios --packagemanager SPM
+          npx cap add ios --packagemanager SPM || true
           sed -i '' "s/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*/IPHONEOS_DEPLOYMENT_TARGET = 15.0/g" ios/App/App.xcodeproj/project.pbxproj
           npx capacitor-assets generate --ios --assetPath assets
-          npx cap copy ios
 
       - name: Compilar aplicación iOS sin firma (xcodebuild)
         run: |
