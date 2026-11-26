@@ -5,33 +5,56 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  prepare-assets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Extraer texturas y sonidos de new-game.zip
+        run: |
+          npm install sharp
+          mkdir -p psp_assets/romfs/img psp_assets/romfs/snd tmp
+          unzip -o new-game.zip -d tmp/
+          node -e "require('sharp')('icon.png').resize(144, 80).png().toFile('psp_assets/ICON0.PNG')"
+          node -e "
+            const fs = require('fs');
+            let ic = 0, sc = 0;
+            const walk = d => fs.readdirSync(d).forEach(f => {
+              const p = d + '/' + f;
+              if (fs.statSync(p).isDirectory()) return walk(p);
+              if (!p.endsWith('.js') && !p.endsWith('.html')) return;
+              const txt = fs.readFileSync(p, 'utf8');
+              const rx = /([a-zA-Z0-9_\"' \-]{0,30})[:=]\s*[\"\'](data:(image|audio)\/([a-z0-9+-]+);base64,([A-Za-z0-9+\/=]+))[\"\']/g;
+              let m;
+              while ((m = rx.exec(txt)) !== null) {
+                const nm = m[1].replace(/[^a-zA-Z0-9_]/g, '');
+                const ext = m[4].replace('jpeg', 'jpg').replace('mpeg', 'mp3');
+                const buf = Buffer.from(m[5], 'base64');
+                if (m[3] === 'image') fs.writeFileSync('psp_assets/romfs/img/' + String(ic++).padStart(2,'0') + '_' + nm + '.' + ext, buf);
+                else fs.writeFileSync('psp_assets/romfs/snd/' + String(sc++).padStart(2,'0') + '_' + nm + '.' + ext, buf);
+              }
+            });
+            walk('tmp');
+            console.log('Extraidos:', ic, 'imagenes y', sc, 'sonidos');
+          "
+      - uses: actions/upload-artifact@v4
+        with:
+          name: psp-prepared-assets
+          path: psp_assets
+
+  build-psp:
+    needs: prepare-assets
     runs-on: ubuntu-latest
     container:
       image: pspdev/pspdev:latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Extraer assets y generar icono PSP
-        run: |
-          mkdir -p psp/romfs/img psp/romfs/snd tmp
-          unzip -o new-game.zip -d tmp/
-          cp icon.png psp/ICON0.PNG
-          perl -MMIME::Base64 -e '
-            $ic = 0; $sc = 0;
-            for $f (<tmp/*.js tmp/*.html tmp/uploads/*.html>) {
-              open(FH, "<", $f) or next; local $/; $txt = <FH>; close(FH);
-              while ($txt =~ /([a-zA-Z0-9_"'\'' \-]{0,30})[:=]\s*["'\'']data:(image|audio)\/([a-z0-9+-]+);base64,([A-Za-z0-9+\/=]+)["'\'']/g) {
-                ($nm, $k, $ext, $b64) = ($1, $2, $3, $4);
-                $nm =~ s/[^a-zA-Z0-9_]//g;
-                $ext =~ s/jpeg/jpg/; $ext =~ s/mpeg/mp3/;
-                $d = decode_base64($b64);
-                $out = ($k eq "image") ? sprintf("psp/romfs/img/%02d_%s.%s", $ic++, $nm, $ext) : sprintf("psp/romfs/snd/%02d_%s.%s", $sc++, $nm, $ext);
-                open(O, ">:raw", $out); print O $d; close(O);
-              }
-            }
-            print "Extraidos $ic sprites y $sc sonidos\n";
-          '
-      - name: Crear codigo C y compilar EBOOT.PBP
+      - uses: actions/download-artifact@v4
+        with:
+          name: psp-prepared-assets
+          path: psp
+      - name: Compilar EBOOT.PBP en PSPDEV
         working-directory: psp
         run: |
           cat << 'EOF' > main.c
