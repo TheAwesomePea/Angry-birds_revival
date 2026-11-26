@@ -27,7 +27,7 @@ jobs:
       - name: Redimensionar icon.ico a 256x256
         run: |
           pip install pillow
-          python -c "from PIL import Image; Image.open('icon.png').save('icon.ico', format='ICO', sizes=[(256, 256)])"
+          python -c "from PIL import Image; Image.open('icon.png').resize((256, 256)).save('icon.ico', format='ICO', sizes=[(256, 256)])"
 
       - name: Compilar instalador Windows (.exe)
         run: npx electron-builder --win --x64
