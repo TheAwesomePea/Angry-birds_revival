@@ -1,4 +1,4 @@
-name: Build Windows EXE
+name: Build Linux Release
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - name: Descargar repositorio
         uses: actions/checkout@v4
@@ -18,23 +18,20 @@ jobs:
           node-version: '20'
 
       - name: Extraer new-game.zip
-        shell: bash
         run: unzip -o new-game.zip -d .
 
-      - name: Instalar dependencias
-        run: npm install
-
-      - name: Redimensionar icon.ico a 256x256
+      - name: Instalar dependencias y redimensionar icono
         run: |
-          pip install pillow
-          python -c "from PIL import Image; Image.open('icon.png').resize((256, 256)).save('icon.ico', format='ICO', sizes=[(256, 256)])"
+          npm install
+          npm install sharp
+          node -e "require('sharp')('icon.png').resize(512, 512).toFile('icon_512.png').then(() => require('fs').renameSync('icon_512.png', 'icon.png'))"
 
-      - name: Compilar instalador Windows (.exe)
-        run: npx electron-builder --win --x64
+      - name: Compilar paquete Linux (.AppImage)
+        run: npx electron-builder --linux AppImage --publish never
 
-      - name: Subir EXE generado
+      - name: Subir artefacto Linux
         uses: actions/upload-artifact@v4
         with:
-          name: Angry-Birds-Revival-Windows-EXE
-          path: dist/*.exe
+          name: Angry-Birds-Revival-Linux
+          path: dist/*.AppImage
           
