@@ -1,0 +1,135 @@
+name: Build PSP Homebrew
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: pspdev/pspdev:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extraer assets y generar icono PSP
+        run: |
+          mkdir -p psp/romfs/img psp/romfs/snd tmp
+          unzip -o new-game.zip -d tmp/
+          python3 -c "
+          import re, base64, glob, shutil
+          try:
+              from PIL import Image
+              Image.open('icon.png').resize((144, 80)).save('psp/ICON0.PNG', 'PNG')
+          except: shutil.copy('icon.png', 'psp/ICON0.PNG')
+          ic = sc = 0
+          rx = re.compile(r'([a-zA-Z0-9_\"\' \-]{0,30})[:=]\s*[\"\'](data:(image|audio)/([a-z0-9+-]+);base64,([A-Za-z0-9+/=]+))[\"\']')
+          for fp in glob.glob('tmp/**/*.*', recursive=True):
+              if not fp.endswith(('.js','.html')): continue
+              txt = open(fp, errors='ignore').read()
+              for m in rx.finditer(txt):
+                  nm = re.sub(r'[^a-zA-Z0-9_]', '', m.group(1))
+                  ext = m.group(4).replace('jpeg','jpg').replace('mpeg','mp3')
+                  try:
+                      d = base64.b64decode(m.group(5))
+                      if m.group(3)=='image':
+                          open(f'psp/romfs/img/{ic:02d}_{nm}.{ext}','wb').write(d); ic+=1
+                      else:
+                          open(f'psp/romfs/snd/{sc:02d}_{nm}.{ext}','wb').write(d); sc+=1
+                  except: pass
+          "
+      - name: Crear codigo C y compilar EBOOT.PBP
+        working-directory: psp
+        run: |
+          cat << 'EOF' > main.c
+          #include <pspkernel.h>
+          #include <pspctrl.h>
+          #include <SDL2/SDL.h>
+          #include <SDL2/SDL_image.h>
+          #include <SDL2/SDL_mixer.h>
+          #include <dirent.h>
+          #include <stdio.h>
+          #include <string.h>
+          #include <math.h>
+          PSP_MODULE_INFO("AngryBirdsRevival", 0, 1, 0);
+          PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER | THREAD_ATTR_VFPU);
+          SDL_Texture* load_tex(SDL_Renderer *r, const char *kw, int idx) {
+              DIR *d = opendir("romfs/img"); if (!d) return NULL;
+              struct dirent *e; char fb = {0}, p; int c = 0;
+              while ((e = readdir(d))) {
+                  if (e->d_name == '.') continue;
+                  snprintf(p, 512, "romfs/img/%s", e->d_name);
+                  if (c++ == idx) strncpy(fb, p, 511);
+                  if (strstr(e->d_name, kw)) { closedir(d); return IMG_LoadTexture(r, p); }
+              }
+              closedir(d); return fb ? IMG_LoadTexture(r, fb) : NULL;
+          }
+          Mix_Chunk* load_snd(const char *kw, int idx) {
+              DIR *d = opendir("romfs/snd"); if (!d) return NULL;
+              struct dirent *e; char fb = {0}, p; int c = 0;
+              while ((e = readdir(d))) {
+                  if (e->d_name == '.') continue;
+                  snprintf(p, 512, "romfs/snd/%s", e->d_name);
+                  if (c++ == idx) strncpy(fb, p, 511);
+                  if (strstr(e->d_name, kw)) { closedir(d); return Mix_LoadWAV(p); }
+              }
+              closedir(d); return fb ? Mix_LoadWAV(fb) : NULL;
+          }
+          int main() {
+              SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO); IMG_Init(IMG_INIT_PNG | IMG_INIT_JPG);
+              Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048);
+              SDL_Window *w = SDL_CreateWindow("ABR", 0, 0, 480, 272, 0);
+              SDL_Renderer *r = SDL_CreateRenderer(w, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+              SDL_Texture *bg = load_tex(r, "bg", 0), *bd = load_tex(r, "bird", 1), *pg = load_tex(r, "pig", 2);
+              Mix_Chunk *sl = load_snd("launch", 0), *sh = load_snd("hit", 1);
+              sceCtrlSetSamplingCycle(0); sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
+              float bx = 80, by = 200, vx = 0, vy = 0, ang = -0.6f, pwr = 9.0f;
+              int act = 0, run = 1, alive = {1, 1, 1}; float px = {350, 405, 378}, py = {210, 210, 175};
+              SceCtrlData pad;
+              while (run) {
+                  sceCtrlReadBufferPositive(&pad, 1);
+                  if (pad.Buttons & PSP_CTRL_START) run = 0;
+                  if (!act) {
+                      if (pad.Buttons & PSP_CTRL_UP) ang -= 0.03f;
+                      if (pad.Buttons & PSP_CTRL_DOWN) ang += 0.03f;
+                      if (pad.Buttons & PSP_CTRL_RIGHT) pwr += 0.15f;
+                      if (pad.Buttons & PSP_CTRL_LEFT) pwr -= 0.15f;
+                      bx = 80; by = 200;
+                      if (pad.Buttons & PSP_CTRL_CROSS) { vx = cosf(ang)*pwr; vy = sinf(ang)*pwr; act = 1; if (sl) Mix_PlayChannel(-1, sl, 0); }
+                  } else {
+                      bx += vx; by += vy; vy += 0.25f;
+                      for (int i = 0; i < 3; i++) if (alive[i] && bx+12>px[i] && bx-12<px[i]+26 && by+12>py[i] && by-12<py[i]+26) { alive[i]=0; if (sh) Mix_PlayChannel(-1, sh, 0); }
+                      if (bx > 500 || by > 240 || (pad.Buttons & PSP_CTRL_CIRCLE)) act = 0;
+                  }
+                  if (pad.Buttons & PSP_CTRL_TRIANGLE) { alive=alive=alive=1; act=0; }
+                  if (bg) SDL_RenderCopy(r, bg, NULL, NULL); else { SDL_SetRenderDrawColor(r, 110, 190, 255, 255); SDL_RenderClear(r); }
+                  for (int i = 0; i < 3; i++) if (alive[i]) { SDL_Rect rc = {(int)px[i], (int)py[i], 26, 26}; if (pg) SDL_RenderCopy(r, pg, NULL, &rc); else { SDL_SetRenderDrawColor(r, 139, 195, 74, 255); SDL_RenderFillRect(r, &rc); } }
+                  SDL_Rect br = {(int)bx-12, (int)by-12, 24, 24};
+                  if (bd) SDL_RenderCopy(r, bd, NULL, &br); else { SDL_SetRenderDrawColor(r, 229, 57, 53, 255); SDL_RenderFillRect(r, &br); }
+                  SDL_RenderPresent(r);
+              }
+              SDL_Quit(); sceKernelExitGame(); return 0;
+          }
+          EOF
+          cat << 'EOF' > Makefile
+          TARGET = AngryBirdsRevival
+          OBJS = main.o
+          CFLAGS = -O2 -G0 -Wall -I$(shell psp-config --psp-prefix)/include/SDL2
+          LIBS = -lSDL2_image -lSDL2_mixer -lSDL2 -lpng -ljpeg -logg -lvorbis -lvorbisfile -lpspgu -lpspgum -lpspctrl -lpspaudio -lpsphprm -lpsppower -lm
+          EXTRA_TARGETS = EBOOT.PBP
+          PSP_EBOOT_TITLE = Angry Birds Revival
+          PSP_EBOOT_ICON = ICON0.PNG
+          PSPSDK=$(shell psp-config --pspsdk-path)
+          include $(PSPSDK)/lib/build.mak
+          EOF
+          make
+      - name: Empaquetar y subir PSP
+        run: |
+          mkdir -p out/AngryBirdsRevival
+          cp psp/EBOOT.PBP out/AngryBirdsRevival/
+          cp -r psp/romfs out/AngryBirdsRevival/
+          cd out && zip -r ../Angry-Birds-Revival-PSP.zip AngryBirdsRevival
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Angry-Birds-Revival-PSP
+          path: Angry-Birds-Revival-PSP.zip
+          
