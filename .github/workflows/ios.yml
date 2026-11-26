@@ -40,7 +40,7 @@ jobs:
           npx cap add ios --packagemanager SPM
           sed -i '' "s/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*/IPHONEOS_DEPLOYMENT_TARGET = 15.0/g" ios/App/App.xcodeproj/project.pbxproj
           npx capacitor-assets generate --ios --assetPath assets
-          npx cap sync ios
+          npx cap copy ios
 
       - name: Compilar aplicación iOS sin firma (xcodebuild)
         run: |
