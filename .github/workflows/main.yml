@@ -1,27 +1,35 @@
 name: Build Windows EXE
-on: [workflow_dispatch]
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
 jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: |
-          tar -xf game.zip
-          Get-ChildItem -Recurse -Include index.html,style.css,game.js,birdjs.js,assets.js | Move-Item -Destination . -Force
-          Add-Type -AssemblyName System.Drawing
-          $img = [System.Drawing.Image]::FromFile("$PWD\icon.ico")
-          $bmp = New-Object System.Drawing.Bitmap(256, 256)
-          $g = [System.Drawing.Graphics]::FromImage($bmp)
-          $g.DrawImage($img, 0, 0, 256, 256)
-          $img.Dispose()
-          $bmp.Save("$PWD\icon_256.png", [System.Drawing.Imaging.ImageFormat]::Png)
-      - uses: actions/setup-node@v4
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 20
-      - run: npm install
-      - run: npm run build
-      - uses: actions/upload-artifact@v4
+          node-version: '20'
+
+      - name: Extraer new-game.zip
+        shell: bash
+        run: unzip -o new-game.zip -d .
+
+      - name: Instalar dependencias
+        run: npm install
+
+      - name: Compilar instalador Windows (.exe)
+        run: npx electron-builder --win --x64
+
+      - name: Subir EXE generado
+        uses: actions/upload-artifact@v4
         with:
-          name: AngryBirdsRevival-Windows
+          name: Angry-Birds-Revival-Windows-EXE
           path: dist/*.exe
           
