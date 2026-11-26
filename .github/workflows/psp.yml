@@ -29,10 +29,10 @@ jobs:
               const rx = /([a-zA-Z0-9_\"' \-]{0,30})[:=]\s*[\"\'](data:(image|audio)\/([a-z0-9+-]+);base64,([A-Za-z0-9+\/=]+))[\"\']/g;
               let m;
               while ((m = rx.exec(txt)) !== null) {
-                const nm = m[1].replace(/[^a-zA-Z0-9_]/g, '');
-                const ext = m[4].replace('jpeg', 'jpg').replace('mpeg', 'mp3');
-                const buf = Buffer.from(m[5], 'base64');
-                if (m[3] === 'image') fs.writeFileSync('psp_assets/romfs/img/' + String(ic++).padStart(2,'0') + '_' + nm + '.' + ext, buf);
+                const nm = m.at(1).replace(/[^a-zA-Z0-9_]/g, '');
+                const ext = m.at(4).replace('jpeg', 'jpg').replace('mpeg', 'mp3');
+                const buf = Buffer.from(m.at(5), 'base64');
+                if (m.at(3) === 'image') fs.writeFileSync('psp_assets/romfs/img/' + String(ic++).padStart(2,'0') + '_' + nm + '.' + ext, buf);
                 else fs.writeFileSync('psp_assets/romfs/snd/' + String(sc++).padStart(2,'0') + '_' + nm + '.' + ext, buf);
               }
             });
@@ -65,31 +65,32 @@ jobs:
           #include <SDL2/SDL_mixer.h>
           #include <dirent.h>
           #include <stdio.h>
+          #include <stdlib.h>
           #include <string.h>
           #include <math.h>
           PSP_MODULE_INFO("AngryBirdsRevival", 0, 1, 0);
           PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER | THREAD_ATTR_VFPU);
           SDL_Texture* load_tex(SDL_Renderer *r, const char *kw, int idx) {
               DIR *d = opendir("romfs/img"); if (!d) return NULL;
-              struct dirent *e; char fb = {0}, p; int c = 0;
+              struct dirent *e; char *fb = calloc(1, 512), *p = calloc(1, 512); int c = 0;
               while ((e = readdir(d))) {
-                  if (e->d_name == '.') continue;
+                  if (*(e->d_name) == '.') continue;
                   snprintf(p, 512, "romfs/img/%s", e->d_name);
                   if (c++ == idx) strncpy(fb, p, 511);
-                  if (strstr(e->d_name, kw)) { closedir(d); return IMG_LoadTexture(r, p); }
+                  if (strstr(e->d_name, kw)) { closedir(d); SDL_Texture *t = IMG_LoadTexture(r, p); free(fb); free(p); return t; }
               }
-              closedir(d); return fb ? IMG_LoadTexture(r, fb) : NULL;
+              closedir(d); SDL_Texture *t = *fb ? IMG_LoadTexture(r, fb) : NULL; free(fb); free(p); return t;
           }
           Mix_Chunk* load_snd(const char *kw, int idx) {
               DIR *d = opendir("romfs/snd"); if (!d) return NULL;
-              struct dirent *e; char fb = {0}, p; int c = 0;
+              struct dirent *e; char *fb = calloc(1, 512), *p = calloc(1, 512); int c = 0;
               while ((e = readdir(d))) {
-                  if (e->d_name == '.') continue;
+                  if (*(e->d_name) == '.') continue;
                   snprintf(p, 512, "romfs/snd/%s", e->d_name);
                   if (c++ == idx) strncpy(fb, p, 511);
-                  if (strstr(e->d_name, kw)) { closedir(d); return Mix_LoadWAV(p); }
+                  if (strstr(e->d_name, kw)) { closedir(d); Mix_Chunk *s = Mix_LoadWAV(p); free(fb); free(p); return s; }
               }
-              closedir(d); return fb ? Mix_LoadWAV(fb) : NULL;
+              closedir(d); Mix_Chunk *s = *fb ? Mix_LoadWAV(fb) : NULL; free(fb); free(p); return s;
           }
           int main() {
               SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO); IMG_Init(IMG_INIT_PNG | IMG_INIT_JPG);
@@ -100,7 +101,7 @@ jobs:
               Mix_Chunk *sl = load_snd("launch", 0), *sh = load_snd("hit", 1);
               sceCtrlSetSamplingCycle(0); sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
               float bx = 80, by = 200, vx = 0, vy = 0, ang = -0.6f, pwr = 9.0f;
-              int act = 0, run = 1, alive = {1, 1, 1}; float px = {350, 405, 378}, py = {210, 210, 175};
+              int act = 0, run = 1, a0 = 1, a1 = 1, a2 = 1;
               SceCtrlData pad;
               while (run) {
                   sceCtrlReadBufferPositive(&pad, 1);
@@ -114,12 +115,16 @@ jobs:
                       if (pad.Buttons & PSP_CTRL_CROSS) { vx = cosf(ang)*pwr; vy = sinf(ang)*pwr; act = 1; if (sl) Mix_PlayChannel(-1, sl, 0); }
                   } else {
                       bx += vx; by += vy; vy += 0.25f;
-                      for (int i = 0; i < 3; i++) if (alive[i] && bx+12>px[i] && bx-12<px[i]+26 && by+12>py[i] && by-12<py[i]+26) { alive[i]=0; if (sh) Mix_PlayChannel(-1, sh, 0); }
+                      if (a0 && bx+12>350 && bx-12<376 && by+12>210 && by-12<236) { a0=0; if (sh) Mix_PlayChannel(-1, sh, 0); }
+                      if (a1 && bx+12>405 && bx-12<431 && by+12>210 && by-12<236) { a1=0; if (sh) Mix_PlayChannel(-1, sh, 0); }
+                      if (a2 && bx+12>378 && bx-12<404 && by+12>175 && by-12<201) { a2=0; if (sh) Mix_PlayChannel(-1, sh, 0); }
                       if (bx > 500 || by > 240 || (pad.Buttons & PSP_CTRL_CIRCLE)) act = 0;
                   }
-                  if (pad.Buttons & PSP_CTRL_TRIANGLE) { alive=alive=alive=1; act=0; }
+                  if (pad.Buttons & PSP_CTRL_TRIANGLE) { a0=1; a1=1; a2=1; act=0; }
                   if (bg) SDL_RenderCopy(r, bg, NULL, NULL); else { SDL_SetRenderDrawColor(r, 110, 190, 255, 255); SDL_RenderClear(r); }
-                  for (int i = 0; i < 3; i++) if (alive[i]) { SDL_Rect rc = {(int)px[i], (int)py[i], 26, 26}; if (pg) SDL_RenderCopy(r, pg, NULL, &rc); else { SDL_SetRenderDrawColor(r, 139, 195, 74, 255); SDL_RenderFillRect(r, &rc); } }
+                  if (a0) { SDL_Rect rc = {350, 210, 26, 26}; if (pg) SDL_RenderCopy(r, pg, NULL, &rc); else { SDL_SetRenderDrawColor(r, 139, 195, 74, 255); SDL_RenderFillRect(r, &rc); } }
+                  if (a1) { SDL_Rect rc = {405, 210, 26, 26}; if (pg) SDL_RenderCopy(r, pg, NULL, &rc); else { SDL_SetRenderDrawColor(r, 139, 195, 74, 255); SDL_RenderFillRect(r, &rc); } }
+                  if (a2) { SDL_Rect rc = {378, 175, 26, 26}; if (pg) SDL_RenderCopy(r, pg, NULL, &rc); else { SDL_SetRenderDrawColor(r, 139, 195, 74, 255); SDL_RenderFillRect(r, &rc); } }
                   SDL_Rect br = {(int)bx-12, (int)by-12, 24, 24};
                   if (bd) SDL_RenderCopy(r, bd, NULL, &br); else { SDL_SetRenderDrawColor(r, 229, 57, 53, 255); SDL_RenderFillRect(r, &br); }
                   SDL_RenderPresent(r);
