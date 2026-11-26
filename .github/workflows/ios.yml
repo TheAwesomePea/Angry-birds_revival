@@ -3,56 +3,56 @@ name: Build iOS Release
 on:
   push:
     branches: [ main ]
-    tags:
-      - 'v*'
-      - 'pre-alpha'
   workflow_dispatch:
 
 jobs:
-  build-ios:
+  build:
     runs-on: macos-latest
-
     steps:
-      - name: Checkout repository
+      - name: Descargar repositorio
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Configurar Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Add and Sync Capacitor iOS
+      - name: Instalar dependencias, Capacitor iOS y Assets
         run: |
-          npm install @capacitor/core @capacitor/cli @capacitor/ios
+          npm install
+          npm install @capacitor/core @capacitor/cli @capacitor/ios @capacitor/assets sharp
+
+      - name: Descomprimir new-game.zip en carpeta web (www)
+        run: |
           mkdir -p www
-          cp index.html style.css game.js birdjs.js assets.js icon.png www/ || true
-          npx cap init "AngryBirdsRevival" "com.luiginumbertwo222.angrybirdsrevival" --web-dir www || true
-          npx cap add ios || true
-          sed -i '' "s/platform :ios, '[0-9.]*'/platform :ios, '15.0'/g" ios/App/Podfile
-          cd ios/App && pod install && cd ../..
+          unzip -o new-game.zip -d www/
+
+      - name: Inicializar iOS y generar iconos sin transparencia (1024x1024)
+        run: |
+          npx cap init "Angry Birds Revival" "com.luiginumbertwo222.angrybirdsrevival" --web-dir www
+          npx cap add ios
+          mkdir -p assets
+          node -e "require('sharp')('icon.png').flatten({ background: '#ffffff' }).resize(1024, 1024).png().toFile('assets/icon.png')"
+          npx capacitor-assets generate --ios
           npx cap sync ios
 
-      - name: Build Unsigned .ipa
+      - name: Compilar aplicación iOS sin firma (xcodebuild)
         run: |
-          xcodebuild -workspace ios/App/App.xcworkspace \
-            -scheme App \
-            -configuration Release \
-            -sdk iphoneos \
-            -derivedDataPath build \
-            IPHONEOS_DEPLOYMENT_TARGET=15.0 \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=""
+          if [ -d "ios/App/App.xcworkspace" ]; then
+            xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Release -sdk iphoneos -derivedDataPath build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO ENABLE_USER_SCRIPT_SANDBOXING=NO
+          else
+            xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release -sdk iphoneos -derivedDataPath build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO ENABLE_USER_SCRIPT_SANDBOXING=NO
+          fi
+
+      - name: Empaquetar archivo .IPA instalable
+        run: |
           mkdir -p Payload
           cp -r build/Build/Products/Release-iphoneos/App.app Payload/
-          zip -r AngryBirdsRevival-iOS.ipa Payload
+          zip -r Angry-Birds-Revival-iOS.ipa Payload
 
-      - name: Upload iOS Artifact
+      - name: Guardar IPA generado
         uses: actions/upload-artifact@v4
         with:
-          name: AngryBirdsRevival-iOS
-          path: AngryBirdsRevival-iOS.ipa
+          name: Angry-Birds-Revival-iOS-IPA
+          path: Angry-Birds-Revival-iOS.ipa
           
