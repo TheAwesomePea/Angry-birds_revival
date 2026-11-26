@@ -23,8 +23,10 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Instalar dependencias
-        run: npm install
+      - name: Instalar dependencias y Capacitor
+        run: |
+          npm install
+          npm install @capacitor/core @capacitor/cli @capacitor/android
 
       - name: Descomprimir new-game.zip en carpeta web (www)
         run: |
@@ -32,7 +34,7 @@ jobs:
           unzip -o new-game.zip -d www/
           cp icon.png www/
 
-      - name: Inicializar Android con el paquete original
+      - name: Inicializar y sincronizar Android
         run: |
           npx cap init "Angry Birds Revival" "com.luiginumbertwo222.angrybirdsrevival" --web-dir www
           npx cap add android
@@ -47,6 +49,6 @@ jobs:
       - name: Guardar APK generado
         uses: actions/upload-artifact@v4
         with:
-          name: Angry-Birds-Revival-1.0.2
+          name: Angry-Birds-Revival-1.0.1
           path: android/app/build/outputs/apk/debug/app-debug.apk
           
