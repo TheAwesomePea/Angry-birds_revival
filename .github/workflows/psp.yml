@@ -15,28 +15,22 @@ jobs:
         run: |
           mkdir -p psp/romfs/img psp/romfs/snd tmp
           unzip -o new-game.zip -d tmp/
-          python3 -c "
-          import re, base64, glob, shutil
-          try:
-              from PIL import Image
-              Image.open('icon.png').resize((144, 80)).save('psp/ICON0.PNG', 'PNG')
-          except: shutil.copy('icon.png', 'psp/ICON0.PNG')
-          ic = sc = 0
-          rx = re.compile(r'([a-zA-Z0-9_\"\' \-]{0,30})[:=]\s*[\"\'](data:(image|audio)/([a-z0-9+-]+);base64,([A-Za-z0-9+/=]+))[\"\']')
-          for fp in glob.glob('tmp/**/*.*', recursive=True):
-              if not fp.endswith(('.js','.html')): continue
-              txt = open(fp, errors='ignore').read()
-              for m in rx.finditer(txt):
-                  nm = re.sub(r'[^a-zA-Z0-9_]', '', m.group(1))
-                  ext = m.group(4).replace('jpeg','jpg').replace('mpeg','mp3')
-                  try:
-                      d = base64.b64decode(m.group(5))
-                      if m.group(3)=='image':
-                          open(f'psp/romfs/img/{ic:02d}_{nm}.{ext}','wb').write(d); ic+=1
-                      else:
-                          open(f'psp/romfs/snd/{sc:02d}_{nm}.{ext}','wb').write(d); sc+=1
-                  except: pass
-          "
+          cp icon.png psp/ICON0.PNG
+          perl -MMIME::Base64 -e '
+            $ic = 0; $sc = 0;
+            for $f (<tmp/*.js tmp/*.html tmp/uploads/*.html>) {
+              open(FH, "<", $f) or next; local $/; $txt = <FH>; close(FH);
+              while ($txt =~ /([a-zA-Z0-9_"'\'' \-]{0,30})[:=]\s*["'\'']data:(image|audio)\/([a-z0-9+-]+);base64,([A-Za-z0-9+\/=]+)["'\'']/g) {
+                ($nm, $k, $ext, $b64) = ($1, $2, $3, $4);
+                $nm =~ s/[^a-zA-Z0-9_]//g;
+                $ext =~ s/jpeg/jpg/; $ext =~ s/mpeg/mp3/;
+                $d = decode_base64($b64);
+                $out = ($k eq "image") ? sprintf("psp/romfs/img/%02d_%s.%s", $ic++, $nm, $ext) : sprintf("psp/romfs/snd/%02d_%s.%s", $sc++, $nm, $ext);
+                open(O, ">:raw", $out); print O $d; close(O);
+              }
+            }
+            print "Extraidos $ic sprites y $sc sonidos\n";
+          '
       - name: Crear codigo C y compilar EBOOT.PBP
         working-directory: psp
         run: |
